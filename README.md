@@ -52,6 +52,31 @@ sudo dnf install android-tools     # Fedora
 make install                       # adb install -r the debug APK
 ```
 
+## First-run setup (Keyboard Setter)
+
+Two one-time steps are needed after installing, both because the app is
+sideloaded rather than installed from an app store:
+
+1. **Grant the settings-write permission** (can't be granted through a normal
+   in-app prompt):
+   ```sh
+   adb shell pm grant com.rauaap.keyboardsetter android.permission.WRITE_SECURE_SETTINGS
+   ```
+   The app detects if this is missing and shows this exact command.
+
+2. **Enable the accessibility service**, via the app's "Open accessibility
+   settings" button or Settings → Accessibility → Keyboard Setter. On
+   Android 13+, sideloaded apps (`installerPackageName=null`, which is what
+   `adb install` produces) are blocked from actually activating accessibility
+   services until you lift that restriction once: **App info → ⋮ (top-right
+   menu) → Allow restricted settings**. Without this step the toggle may
+   *appear* to turn on (and even survive reinstalls) without the service ever
+   actually receiving events — do this first if switching doesn't seem to
+   work. Equivalent one-liner:
+   ```sh
+   adb shell cmd appops set com.rauaap.keyboardsetter android:access_restricted_settings allow
+   ```
+
 ## Starting a new app from this template
 
 Replace each placeholder value below. The package id (`com.example.app`) must be

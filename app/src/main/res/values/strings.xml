@@ -1,3 +1,27 @@
 <resources>
-    <string name="app_name">AndroidApp</string>
+    <string name="app_name">Keyboard Setter</string>
+
+    <string name="accessibility_service_description">Watches which app is in the foreground so Keyboard Setter can switch your keyboard automatically. Does not read screen content.</string>
+
+    <string name="notification_channel_permission_revoked">Keyboard permission revoked</string>
+    <string name="notification_permission_revoked_title">Keyboard Setter needs re-granting</string>
+    <string name="notification_permission_revoked_text">The system settings permission was revoked. Open Keyboard Setter for instructions.</string>
+
+    <string name="permission_banner_message">Keyboard Setter needs the WRITE_SECURE_SETTINGS permission to switch keyboards. Grant it once from a computer with adb:</string>
+    <string name="permission_banner_command">adb shell pm grant %1$s android.permission.WRITE_SECURE_SETTINGS</string>
+
+    <string name="accessibility_banner_message">The accessibility service that watches for app switches is not enabled yet. If tapping below doesn\'t show a normal confirmation dialog, first allow restricted settings for this app: App info → ⋮ (top-right menu) → Allow restricted settings.</string>
+    <string name="accessibility_banner_button">Open accessibility settings</string>
+
+    <string name="mappings_header">Mappings</string>
+    <string name="mappings_empty">No mappings yet. Add one below.</string>
+    <string name="mapping_row_label">%1$s → %2$s</string>
+    <string name="remove_mapping_button">Remove</string>
+    <string name="stale_mapping_removed">Removed one or more mappings pointing at an uninstalled keyboard.</string>
+
+    <string name="add_mapping_button">Add mapping</string>
+    <string name="app_picker_title">Choose an app</string>
+    <string name="ime_picker_title">Choose a keyboard</string>
+    <string name="no_imes_installed">No keyboards are installed.</string>
+    <string name="disabled_keyboard_tip">Tip: for a keyboard you only want in one app, leave it disabled in system settings. It still works here — and staying disabled keeps it out of your manual keyboard switcher.</string>
 </resources>

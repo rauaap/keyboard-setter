@@ -1,6 +1,6 @@
-IMAGE ?= android-builder
+IMAGE ?= keyboard-setter-builder
 PODMAN ?= podman
-GRADLE_CACHE ?= android-gradle-cache
+GRADLE_CACHE ?= keyboard-setter-gradle-cache
 
 RUN_ANDROID = $(PODMAN) run --rm --userns=keep-id \
 	-e HOME=/gradle-cache \
