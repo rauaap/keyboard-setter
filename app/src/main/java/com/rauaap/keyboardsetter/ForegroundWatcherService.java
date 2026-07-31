@@ -6,15 +6,13 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
-import android.view.inputmethod.InputMethodInfo;
-import android.view.inputmethod.InputMethodManager;
-
-import java.util.List;
 
 /**
  * Watches foreground app changes and swaps the active IME to match the
@@ -60,10 +58,14 @@ public class ForegroundWatcherService extends AccessibilityService {
             return;
         }
         String packageName = packageNameCs.toString();
-        // A software keyboard's own window briefly becomes the "foreground" package
-        // when it shows or hides — that's not a real app switch and must not be
-        // treated as leaving mapped territory, or every switch immediately undoes itself.
-        if (isImePackage(packageName)) {
+        // TYPE_WINDOW_STATE_CHANGED fires for any window becoming active, not just app
+        // switches — the clipboard overlay, notification shade, toasts, selection popups
+        // and keyboard show/hide all fire it too, carrying their own package. Treating
+        // those as "the user left this app" restores the pre-automation IME while the
+        // mapped app is still very much in the foreground, and for overlays that never
+        // background the app there's no return event to undo it. Only windows that
+        // resolve to a declared activity represent a real foreground app change.
+        if (!isActivityWindow(packageName, event.getClassName())) {
             return;
         }
 
@@ -105,15 +107,24 @@ public class ForegroundWatcherService extends AccessibilityService {
         }
     }
 
-    private boolean isImePackage(String packageName) {
-        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-        List<InputMethodInfo> imes = imm.getInputMethodList();
-        for (InputMethodInfo ime : imes) {
-            if (ime.getPackageName().equals(packageName)) {
-                return true;
-            }
+    /**
+     * True if the window that fired the event is a declared activity of the given
+     * package. Overlays, popups, toasts and IME windows report a plain view or window
+     * class here rather than an activity, so they resolve to nothing and are ignored.
+     * Failing to resolve also covers packages hidden by the manifest's {@code queries}
+     * filter — erring toward "not an app switch", which leaves the current IME alone.
+     */
+    private boolean isActivityWindow(String packageName, CharSequence className) {
+        if (className == null) {
+            return false;
         }
-        return false;
+        try {
+            getPackageManager().getActivityInfo(
+                    new ComponentName(packageName, className.toString()), 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
     }
 
     private boolean applyIme(String imeId) {

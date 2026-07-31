@@ -27,10 +27,17 @@ Three components:
 - Does **not** request `canRetrieveWindowContent` — package name is available directly on the event, no window inspection needed. Keeps the permission footprint minimal and avoids the scarier "read screen content" consent prompt.
 - On each `TYPE_WINDOW_STATE_CHANGED` event:
   1. Read `event.getPackageName()`.
-  2. Debounce: ignore repeat events for the same package within a short window (e.g. 300ms) to avoid spamming settings writes when dialogs/popups fire extra events within the same app.
-  3. Look up the package in the mapping store.
-  4. If a mapping exists and differs from the currently active IME, write the new IME ID.
-  5. If no mapping exists, do nothing (leave whatever IME is currently active — no "default" fallback that surprises the user).
+  2. Confirm the event describes a real app switch, not merely a window becoming
+     active. `TYPE_WINDOW_STATE_CHANGED` fires for overlays, popups, toasts, the
+     notification shade, the keyguard and IME show/hide too, each carrying its own
+     package. Resolve `event.getPackageName()` + `event.getClassName()` through
+     `PackageManager.getActivityInfo()`: real activities resolve, everything else
+     throws `NameNotFoundException` and is ignored. See "Window events are not app
+     switches" below for why this is load-bearing.
+  3. Debounce: ignore repeat events for the same package within a short window (e.g. 300ms) to avoid spamming settings writes when dialogs/popups fire extra events within the same app.
+  4. Look up the package in the mapping store.
+  5. If a mapping exists and differs from the currently active IME, write the new IME ID.
+  6. If no mapping exists, do nothing (leave whatever IME is currently active — no "default" fallback that surprises the user).
 
 ### 2. IME switch mechanism
 
@@ -56,6 +63,7 @@ The app must detect at launch whether this permission is currently held (`checkS
 App switch on screen
    -> AccessibilityService.onAccessibilityEvent(TYPE_WINDOW_STATE_CHANGED)
    -> extract package name
+   -> activity-window check (drop overlays, popups, shade, keyguard, IME windows)
    -> debounce check
    -> mapping lookup (SharedPreferences read)
    -> if mapped app:
@@ -77,13 +85,51 @@ a single-app keyboard (see the in-app tip). But it also means there is no
 manual fallback if it's left active after leaving the app, so restore-on-exit
 is load-bearing, not just tidiness.
 
+## Window events are not app switches
+
+The mapping is defined over foreground *apps*, but the only signal available is
+*window* events — and those two diverge exactly when another package draws over an
+app that hasn't gone anywhere.
+
+Confirmed on device: copying text in a mapped app swapped the keyboard back to the
+pre-automation default. Android 13+ renders a clipboard confirmation overlay from
+`com.android.systemui`, which fires `TYPE_WINDOW_STATE_CHANGED` carrying that
+package. Unmapped, so the service concluded the user had left mapped territory and
+restored. The notification shade, volume panel, toasts and the keyguard all do the
+same thing.
+
+What makes this more than cosmetic is that these windows never background the app.
+Because the mapped app's window never *changes state*, dismissing the overlay
+produces no return event, so nothing re-applies the mapping — the wrong keyboard
+persists until some later event happens to carry the mapped package again. Note the
+contrast with genuine interruptions that *are* activities (permission dialogs, share
+sheets): those do fire a return event on dismissal and recover on their own, so they
+need no special handling.
+
+The filter is the activity check in step 2 above. Two properties worth keeping:
+
+- **It fails safe.** An unresolvable window is treated as "not an app switch", which
+  leaves the current IME alone. The manifest's `queries` filter also hides
+  non-launchable packages, so those fail to resolve too — same benign direction.
+- **It subsumes the IME-package check** it replaced. A soft input window reports
+  `android.inputmethodservice.SoftInputWindow`, not an activity, so keyboard
+  show/hide is filtered without a per-event `getInputMethodList()` call — and a
+  keyboard's own *settings* activity is now correctly seen as a real app switch.
+
+Rejected alternatives: denylisting `com.android.systemui` and friends fixes one
+symptom at a time and breaks on the next OEM skin. `getWindows()` /
+`AccessibilityWindowInfo.getType()` is the most correct signal, but
+`FLAG_RETRIEVE_INTERACTIVE_WINDOWS` requires `canRetrieveWindowContent="true"` and
+the "read screen content" consent prompt this design deliberately avoids.
+
 ## Edge cases to handle explicitly
 
 | Case | Handling |
 |---|---|
 | `WRITE_SECURE_SETTINGS` revoked (OEM battery cleanup, reinstall) | Detect on service start and on each failed write (catch `SecurityException`); surface a persistent notification prompting re-grant, don't just silently stop working |
 | Mapped IME uninstalled | Detect via `getInputMethodList()` not containing the stored component; drop the stale mapping and notify the user next time they open the app, rather than trying to switch to a nonexistent IME |
-| Rapid app switching (e.g. multitasking/split-screen) | Debounce window handles most of this; consider ignoring events from known system/launcher packages entirely |
+| Overlay windows from other packages (clipboard confirmation, notification shade, volume panel, keyguard, toasts) | Ignore any event whose window doesn't resolve to a declared activity — see "Window events are not app switches" above |
+| Rapid app switching (e.g. multitasking/split-screen) | Debounce window handles most of this, and the activity check drops the transient non-app windows that used to slip through |
 | Split-screen / multi-window with two different mapped apps visible at once | Out of scope for v1 — last event wins, document this as a known limitation rather than trying to solve it |
 | Device reboot | `AccessibilityService` needs to be re-enabled by the user after reboot on some OEM skins regardless of manifest config — document this as a known Android limitation, not a bug in this app |
 | OEM aggressive service killing (MIUI, One UI, etc.) | Out of scope to "fix" — document as a known constraint; user may need to whitelist the app from battery optimization |
@@ -92,7 +138,7 @@ is load-bearing, not just tidiness.
 
 - `BIND_ACCESSIBILITY_SERVICE` (system-granted on service binding, standard)
 - `WRITE_SECURE_SETTINGS` (manual one-time adb grant, documented above)
-- Accessibility service config XML: `typeWindowStateChanged` only, `canRetrieveWindowContent="false"`
+- Accessibility service config XML: `typeWindowStateChanged` only, `canRetrieveWindowContent="false"` (kept false deliberately — see the rejected alternatives above)
 
 ## Open questions for implementation
 
