@@ -110,11 +110,36 @@ The filter is the activity check in step 2 above. Two properties worth keeping:
 
 - **It fails safe.** An unresolvable window is treated as "not an app switch", which
   leaves the current IME alone. The manifest's `queries` filter also hides
-  non-launchable packages, so those fail to resolve too — same benign direction.
+  non-launchable packages, so those fail to resolve too — same direction, and benign
+  for everything except the home screen (see below).
 - **It subsumes the IME-package check** it replaced. A soft input window reports
   `android.inputmethodservice.SoftInputWindow`, not an activity, so keyboard
   show/hide is filtered without a per-event `getInputMethodList()` call — and a
   keyboard's own *settings* activity is now correctly seen as a real app switch.
+
+### The home screen is the exception
+
+Going home is the most common way to leave a mapped app, and it's also the window
+least likely to resolve — so the filter silently broke restore-on-exit for the case
+that matters most (confirmed on device: leaving Termux via gesture *or* the 3-button
+home key kept Unexpected Keyboard active). Two independent reasons it fails:
+
+- **Package visibility.** A launcher isn't in its own app drawer, so it has no
+  `CATEGORY_LAUNCHER` activity — its home entry is `MAIN` + `CATEGORY_HOME` +
+  `DEFAULT`. The `queries` filter therefore never made the launcher package visible,
+  and `getActivityInfo()` throws `NameNotFoundException` no matter how correct the
+  component is. Fixed by declaring a second `queries` intent for `MAIN` + `HOME`.
+- **Class-name mismatch.** The event carries the *runtime* class
+  (`Activity.getClass().getName()`), while `getActivityInfo()` wants the declared
+  `android:name`. Launchers commonly register the HOME entry as an
+  `<activity-alias>`, so the two differ even once the package is visible.
+
+Hence the fallback: any window whose package is the current default home package
+(`resolveActivity` on a `MAIN`/`HOME` intent) counts as a real app switch, class name
+notwithstanding. Home-package popups (widget picker, icon long-press menu) get let
+through by this too, which is harmless — the home screen is already foreground, so an
+unmapped home re-runs a restore that has already cleared its state, and a mapped home
+re-applies an IME that's already active.
 
 Rejected alternatives: denylisting `com.android.systemui` and friends fixes one
 symptom at a time and breaks on the next OEM skin. `getWindows()` /
@@ -129,6 +154,7 @@ the "read screen content" consent prompt this design deliberately avoids.
 | `WRITE_SECURE_SETTINGS` revoked (OEM battery cleanup, reinstall) | Detect on service start and on each failed write (catch `SecurityException`); surface a persistent notification prompting re-grant, don't just silently stop working |
 | Mapped IME uninstalled | Detect via `getInputMethodList()` not containing the stored component; drop the stale mapping and notify the user next time they open the app, rather than trying to switch to a nonexistent IME |
 | Overlay windows from other packages (clipboard confirmation, notification shade, volume panel, keyguard, toasts) | Ignore any event whose window doesn't resolve to a declared activity — see "Window events are not app switches" above |
+| Leaving a mapped app via home (gesture or home button) | The launcher's window doesn't resolve as an activity, so the activity check alone drops it and never restores. Declare `MAIN`/`HOME` in `queries` and accept any window from the current home package — see "The home screen is the exception" above |
 | Rapid app switching (e.g. multitasking/split-screen) | Debounce window handles most of this, and the activity check drops the transient non-app windows that used to slip through |
 | Split-screen / multi-window with two different mapped apps visible at once | Out of scope for v1 — last event wins, document this as a known limitation rather than trying to solve it |
 | Device reboot | `AccessibilityService` needs to be re-enabled by the user after reboot on some OEM skins regardless of manifest config — document this as a known Android limitation, not a bug in this app |

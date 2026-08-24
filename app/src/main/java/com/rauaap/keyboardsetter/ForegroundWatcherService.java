@@ -9,6 +9,7 @@ import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
@@ -113,18 +114,36 @@ public class ForegroundWatcherService extends AccessibilityService {
      * class here rather than an activity, so they resolve to nothing and are ignored.
      * Failing to resolve also covers packages hidden by the manifest's {@code queries}
      * filter — erring toward "not an app switch", which leaves the current IME alone.
+     *
+     * <p>The home screen is the exception that has to be rescued: it's the most common
+     * way to leave a mapped app, and its window is the one most likely not to resolve
+     * (launchers commonly register the HOME entry as an {@code <activity-alias>}, so the
+     * runtime class the event carries isn't a declared activity name). Treat any window
+     * belonging to the current home package as a real app switch.
      */
     private boolean isActivityWindow(String packageName, CharSequence className) {
-        if (className == null) {
-            return false;
+        if (className != null) {
+            try {
+                getPackageManager().getActivityInfo(
+                        new ComponentName(packageName, className.toString()), 0);
+                return true;
+            } catch (PackageManager.NameNotFoundException e) {
+                // Fall through to the home check.
+            }
         }
-        try {
-            getPackageManager().getActivityInfo(
-                    new ComponentName(packageName, className.toString()), 0);
-            return true;
-        } catch (PackageManager.NameNotFoundException e) {
-            return false;
-        }
+        return packageName.equals(homePackage());
+    }
+
+    /**
+     * Package of the current default home app, or null if it can't be resolved.
+     * Resolved per call rather than cached so switching launchers takes effect without
+     * restarting the service; this only runs on the path where the activity lookup
+     * already failed, and costs the same single PackageManager call it replaces.
+     */
+    private String homePackage() {
+        Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+        ResolveInfo info = getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+        return info == null || info.activityInfo == null ? null : info.activityInfo.packageName;
     }
 
     private boolean applyIme(String imeId) {

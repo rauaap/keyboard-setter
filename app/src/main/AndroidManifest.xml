@@ -10,6 +10,13 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- The home app is not in its own app drawer, so it has no LAUNCHER-category
+             activity and the filter above leaves it invisible. Without this the
+             launcher's window can't be resolved and going home never restores the IME. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
     </queries>
 
     <application
